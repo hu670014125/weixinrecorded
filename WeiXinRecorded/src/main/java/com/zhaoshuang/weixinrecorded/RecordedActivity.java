@@ -105,10 +105,7 @@ public class RecordedActivity extends BaseActivity {
 
     private void initData() {
 
-        sv_ffmpeg.setTouchFocus(mMediaRecorder);
-
         rb_start.setMax(maxDuration);
-
         rb_start.setOnGestureListener(new RecordedButton.OnGestureListener() {
             @Override
             public void onLongClick() {
@@ -119,7 +116,6 @@ public class RecordedActivity extends BaseActivity {
                 rb_start.setSplit();
                 myHandler.sendEmptyMessageDelayed(HANDLER_RECORD, 50);
                 cameraTypeList.add(mMediaRecorder.getCameraType());
-
                 isVideoData = true;
             }
             @Override
@@ -319,7 +315,7 @@ public class RecordedActivity extends BaseActivity {
                             Toast.makeText(getApplicationContext(), "照片拍摄失败", Toast.LENGTH_SHORT).show();
                         } else {
                             dialogTextView.setText("照片编辑中");
-                            sendEmptyMessageDelayed(HANDLER_CAMERA_PHOTO, 10);
+                            sendEmptyMessageDelayed(HANDLER_CAMERA_PHOTO, 30);
                         }
                     }
                     break;
@@ -530,6 +526,8 @@ public class RecordedActivity extends BaseActivity {
         //滤波器相关
         UtilityAdapter.freeFilterParser();
         UtilityAdapter.initFilterParser();
+        sv_ffmpeg.setTouchFocus(mMediaRecorder);
+
 
     }
 
