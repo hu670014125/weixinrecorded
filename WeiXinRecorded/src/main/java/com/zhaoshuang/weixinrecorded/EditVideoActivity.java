@@ -34,6 +34,7 @@ import android.widget.Toast;
 import com.yixia.camera.MediaRecorderBase;
 import com.yixia.videoeditor.adapter.UtilityAdapter;
 import com.zero.smallvideorecord.VideoInfo;
+import com.zero.smallvideorecord.jniinterface.FFmpegBridge;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -660,13 +661,11 @@ public class EditVideoActivity extends BaseActivity {
         } catch (IOException e) {
             e.printStackTrace();
         }
-
         long currentTimeMillis = System.currentTimeMillis();
         String mergeVideo = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
         String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
 
-
-        //ffmpeg -i videoPath -i imagePath -filter_complex overlay=0:0 -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k -g 30 -f mp4 outPath
+        //ffmpeg -i videoPath -i imagePath -filter_complex overlay=0:0 -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k  outPath
         StringBuilder sb = new StringBuilder();
         sb.append("ffmpeg");
         sb.append(" -i");
@@ -675,15 +674,13 @@ public class EditVideoActivity extends BaseActivity {
         sb.append(" " + imagePath);
         sb.append(" -filter_complex");
         sb.append(" overlay=0:0");
-        sb.append(" -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k -g 25");
-        sb.append(" -f mp4");
+        sb.append(" -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k");
         sb.append(" " + mergeVideo);
-        String cmd = String.format("ffmpeg -i %s -vframes 1 %s", mergeVideo, outputImagePath);
         UtilityAdapter.FFmpegRun("", sb.toString());
+        String cmd = String.format("ffmpeg -i %s -vframes 1 %s", mergeVideo, outputImagePath);
         UtilityAdapter.FFmpegRun("", cmd);
         return new VideoInfo(true,mergeVideo,outputImagePath);
     }
-
     /**
      * 调整视频播放速度
      */
@@ -694,20 +691,17 @@ public class EditVideoActivity extends BaseActivity {
         String outPut = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
         String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
 
-        //./ffmpeg -i 2x.mp4 -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" output3.mp4
-        String filter = String.format(Locale.getDefault(), "[0:v]setpts=%f*PTS[v];[0:a]atempo=%f[a]", 1 / speed, speed);
+//        ./ffmpeg -i move6.mp4 -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" move6_kuai.mp4
+        String filter = String.format(Locale.getDefault(), "\"[0:v]setpts=%f*PTS[v];[0:a]atempo=%f[a]\" -map \"[v]\" -map \"[a]\"", 1 / speed, speed);
         StringBuilder sb = new StringBuilder("ffmpeg");
         sb.append(" -i");
         sb.append(" " + path);
         sb.append(" -filter_complex");
         sb.append(" " + filter);
-        sb.append(" -map");
-        sb.append(" [v]");
-        sb.append(" -map");
-        sb.append(" [a]");
         sb.append(" -y");
         sb.append(" " + outPut);
         String cmd = String.format("ffmpeg -i %s -vframes 1 %s", outPut, outputImagePath);
+        //FFmpegBridge.jxFFmpegCMDRun(sb.toString());
         UtilityAdapter.FFmpegRun("", sb.toString());
         UtilityAdapter.FFmpegRun("", cmd);
         return new VideoInfo(true,outPut,outputImagePath);
@@ -799,7 +793,10 @@ public class EditVideoActivity extends BaseActivity {
 
             @Override
             protected VideoInfo doInBackground(Void... params) {
-                VideoInfo videoInfo = mergeImage(mVideoInfo.getVideoPath());
+                VideoInfo videoInfo=mVideoInfo;
+                if (tv_video.getPathSum()>0){
+                     videoInfo = mergeImage(mVideoInfo.getVideoPath());
+                }
                 if (videoSpeed != 1) {
                     videoInfo = adjustVideoSpeed(mVideoInfo.getVideoPath(), videoSpeed);
                 }
