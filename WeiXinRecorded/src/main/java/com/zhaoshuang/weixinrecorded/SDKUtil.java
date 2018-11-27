@@ -2,6 +2,7 @@ package com.zhaoshuang.weixinrecorded;
 
 import android.content.Context;
 
+import com.zero.smallvideorecord.jniinterface.FFmpegBridge;
 import com.yixia.camera.VCamera;
 
 import java.io.File;
@@ -12,13 +13,14 @@ import java.io.File;
 
 public class SDKUtil {
 
-    public static String VIDEO_PATH =  "/sdcard/WeiXinRecordedDemo/";
+    public static String VIDEO_PATH =  "/sdcard/";
 
-    public static void initSDK(Context context) {
-
-        VIDEO_PATH += String.valueOf(System.currentTimeMillis());
+    public static void initSDK(Context context,String path) {
+        VIDEO_PATH=path;
         File file = new File(VIDEO_PATH);
-        if (!file.exists()) file.mkdirs();
+        if (!file.exists()) {
+            boolean mkdirs = file.mkdirs();
+        }
 
         //设置视频缓存路径
         VCamera.setVideoCachePath(VIDEO_PATH);
@@ -28,5 +30,6 @@ public class SDKUtil {
 
         // 初始化拍摄SDK，必须
         VCamera.initialize(context);
+        FFmpegBridge.initJXFFmpeg(true,String.format("%s/ffmpeg.log",VIDEO_PATH));
     }
 }

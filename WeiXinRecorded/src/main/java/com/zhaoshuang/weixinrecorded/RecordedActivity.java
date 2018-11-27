@@ -2,11 +2,11 @@ package com.zhaoshuang.weixinrecorded;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.media.MediaMetadataRetriever;
+import android.graphics.BitmapFactory;
 import android.media.MediaPlayer;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.text.TextUtils;
@@ -21,11 +21,10 @@ import com.yixia.camera.MediaRecorderNative;
 import com.yixia.camera.VCamera;
 import com.yixia.camera.model.MediaObject;
 import com.yixia.videoeditor.adapter.UtilityAdapter;
+import com.zero.smallvideorecord.VideoInfo;
+import com.zero.smallvideorecord.jniinterface.FFmpegBridge;
 
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -64,7 +63,7 @@ public class RecordedActivity extends BaseActivity {
     private ImageView iv_change_camera;
 
     //最大录制时间
-    private int maxDuration = 8000;
+    private int maxDuration = 10000;
     //本次段落是否录制完成
     private boolean isRecordedOver;
     private ImageView iv_change_flash;
@@ -73,13 +72,17 @@ public class RecordedActivity extends BaseActivity {
     //是否视频数据
     private boolean isVideoData;
     private String imagePath;
+    private VideoInfo mVideoInfo=null;
+    private long startTime = 0;
+    private long endTime = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_recorded);
-        SDKUtil.initSDK(this);
+        String path = Environment.getExternalStorageDirectory().getPath() + "/ffmpeg";
+        SDKUtil.initSDK(this, path);
         initUI();
         initData();
         initMediaRecorder();
@@ -109,7 +112,6 @@ public class RecordedActivity extends BaseActivity {
         rb_start.setOnGestureListener(new RecordedButton.OnGestureListener() {
             @Override
             public void onLongClick() {
-                System.out.println("---------------->长按录像");
                 //长按录像
                 isRecordedOver = false;
                 mMediaRecorder.startRecord();
@@ -118,27 +120,30 @@ public class RecordedActivity extends BaseActivity {
                 cameraTypeList.add(mMediaRecorder.getCameraType());
                 isVideoData = true;
             }
+
             @Override
             public void onClick() {
-                System.out.println("---------------->点击拍照："+isVideoData);
-                if(!isVideoData) {
+                startTime = System.currentTimeMillis();
+                if (!isVideoData) {
                     //点击拍照
                     dialogTextView = showProgressDialog();
                     dialogTextView.setText("正在抓取屏幕, 请保持静止");
                     mMediaRecorder.startRecord();
-                    myHandler.sendEmptyMessageDelayed(HANDLER_CAMERA_PHOTO, 30);
+                    myHandler.sendEmptyMessage(HANDLER_CAMERA_PHOTO);
                 }
             }
+
             @Override
             public void onLift() {
-                System.out.println("------------->视频录制暂停");
+
                 isRecordedOver = true;
                 mMediaRecorder.stopRecord();
                 changeButton(mMediaObject.getMediaParts().size() > 0);
             }
+
             @Override
             public void onOver() {
-                System.out.println("------------->视频录制完成");
+
                 isRecordedOver = true;
                 rb_start.closeButton();
                 mMediaRecorder.stopRecord();
@@ -160,9 +165,9 @@ public class RecordedActivity extends BaseActivity {
                     iv_back.setImageResource(R.mipmap.video_delete);
 
                     int size = mMediaObject.getMediaParts().size();
-                    if(size > 0){
+                    if (size > 0) {
                         changeButton(true);
-                    }else{
+                    } else {
                         isVideoData = false;
                         changeButton(false);
                     }
@@ -184,10 +189,17 @@ public class RecordedActivity extends BaseActivity {
             @Override
             public void onClick(View v) {
                 if (isVideoData) {
-                    rb_start.setDeleteMode(false);
-                    Intent intent = new Intent(RecordedActivity.this, EditVideoActivity.class);
-                    intent.putExtra("path", SDKUtil.VIDEO_PATH + "/finish.mp4");
-                    startActivityForResult(intent, REQUEST_KEY);
+                    if (mVideoInfo==null){
+                        Toast.makeText(mContext, "视频拍摄失败", Toast.LENGTH_SHORT).show();
+                        initMediaRecorderState();
+
+                    }else {
+                        rb_start.setDeleteMode(false);
+                        Intent intent = new Intent(RecordedActivity.this, EditVideoActivity.class);
+                        intent.putExtra("videoInfo", mVideoInfo);
+                        startActivityForResult(intent, REQUEST_KEY);
+                    }
+
                 } else {
                     Intent intent = new Intent();
                     intent.putExtra("imagePath", imagePath);
@@ -224,12 +236,12 @@ public class RecordedActivity extends BaseActivity {
         });
     }
 
-    private void changeButton(boolean flag){
+    private void changeButton(boolean flag) {
 
-        if(flag){
+        if (flag) {
             tv_hint.setVisibility(View.VISIBLE);
             rl_bottom.setVisibility(View.VISIBLE);
-        }else{
+        } else {
             tv_hint.setVisibility(View.GONE);
             rl_bottom.setVisibility(View.GONE);
         }
@@ -238,7 +250,7 @@ public class RecordedActivity extends BaseActivity {
     /**
      * 初始化视频拍摄状态
      */
-    private void initMediaRecorderState(){
+    private void initMediaRecorderState() {
 
         isVideoData = false;
         vv_play.setVisibility(View.GONE);
@@ -254,7 +266,7 @@ public class RecordedActivity extends BaseActivity {
         LinkedList<MediaObject.MediaPart> list = new LinkedList<>();
         list.addAll(mMediaObject.getMediaParts());
 
-        for (MediaObject.MediaPart part : list){
+        for (MediaObject.MediaPart part : list) {
             mMediaObject.removePart(part, true);
         }
 
@@ -273,51 +285,53 @@ public class RecordedActivity extends BaseActivity {
     }
 
     @SuppressLint("HandlerLeak")
-    private Handler myHandler = new Handler(){
+    private Handler myHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
-            switch (msg.what){
+            switch (msg.what) {
                 case HANDLER_RECORD: {
-                        //拍摄视频的handler
-                        if (!isRecordedOver) {
-                            if (rl_bottom.getVisibility() == View.VISIBLE) {
-                                changeButton(false);
-                            }
-                            rb_start.setProgress(mMediaObject.getDuration());
-                            myHandler.sendEmptyMessageDelayed(HANDLER_RECORD, 30);
+                    //拍摄视频的handler
+                    if (!isRecordedOver) {
+                        if (rl_bottom.getVisibility() == View.VISIBLE) {
+                            changeButton(false);
                         }
+                        rb_start.setProgress(mMediaObject.getDuration());
+                        myHandler.sendEmptyMessageDelayed(HANDLER_RECORD, 30);
                     }
-                    break;
+                }
+                break;
                 case HANDLER_EDIT_VIDEO: {
-                        //合成视频的handler
-                        int progress = UtilityAdapter.FilterParserAction("", UtilityAdapter.PARSERACTION_PROGRESS);
-                        if (dialogTextView != null) dialogTextView.setText("视频编译中 " + progress + "%");
-                        if (progress == 100) {
-                            syntVideo();
-                        } else if (progress == -1) {
-                            closeProgressDialog();
-                            Toast.makeText(getApplicationContext(), "视频合成失败", Toast.LENGTH_SHORT).show();
-                        } else {
-                            sendEmptyMessageDelayed(HANDLER_EDIT_VIDEO, 20);
-                        }
+                    //合成视频的handler
+                    int progress = UtilityAdapter.FilterParserAction("", UtilityAdapter.PARSERACTION_PROGRESS);
+                    if (dialogTextView != null) dialogTextView.setText("视频编译中 " + progress + "%");
+                    if (progress == 100) {
+                        syntVideo();
+                    } else if (progress == -1) {
+                        closeProgressDialog();
+                        Toast.makeText(getApplicationContext(), "视频合成失败", Toast.LENGTH_SHORT).show();
+                    } else {
+                        sendEmptyMessageDelayed(HANDLER_EDIT_VIDEO, 20);
                     }
-                    break;
+                }
+                break;
                 case HANDLER_CAMERA_PHOTO: {
-                        //拍照
-                        if(mMediaRecorder.getRecordState()){
-                            mMediaRecorder.stopRecord();
-                        }
-                        int progress = UtilityAdapter.FilterParserAction("", UtilityAdapter.PARSERACTION_PROGRESS);
-                        if (progress == 100) {
-                            syntCamera();
-                        } else if (progress == -1) {
-                            closeProgressDialog();
-                            Toast.makeText(getApplicationContext(), "照片拍摄失败", Toast.LENGTH_SHORT).show();
-                        } else {
-                            dialogTextView.setText("照片编辑中");
-                            sendEmptyMessageDelayed(HANDLER_CAMERA_PHOTO, 30);
-                        }
+                    //拍照
+                    if (mMediaRecorder.getRecordState()) {
+                        mMediaRecorder.stopRecord();
                     }
+                    int progress = UtilityAdapter.FilterParserAction("", UtilityAdapter.PARSERACTION_PROGRESS);
+                    if (progress == 100) {
+                        syntCamera();
+                    } else if (progress == -1) {
+                        closeProgressDialog();
+                        Toast.makeText(getApplicationContext(), "照片拍摄失败", Toast.LENGTH_SHORT).show();
+                    } else {
+                        dialogTextView.setText("照片编辑中");
+                        sendEmptyMessageDelayed(HANDLER_CAMERA_PHOTO, 30);
+                    }
+                }
+                break;
+                default:
                     break;
             }
         }
@@ -327,21 +341,24 @@ public class RecordedActivity extends BaseActivity {
      * 合成视频
      */
     @SuppressLint("StaticFieldLeak")
-    private void syntVideo(){
+    private void syntVideo() {
 
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, VideoInfo>() {
             @Override
             protected void onPreExecute() {
-                if(dialogTextView != null) dialogTextView.setText("视频合成中");
+                if (dialogTextView != null) {
+                    dialogTextView.setText("视频合成中");
+                }
             }
+
             @Override
-            protected String doInBackground(Void... params) {
+            protected VideoInfo doInBackground(Void... params) {
 
                 List<String> pathList = new ArrayList<>();
                 for (int x = 0; x < mMediaObject.getMediaParts().size(); x++) {
                     MediaObject.MediaPart mediaPart = mMediaObject.getMediaParts().get(x);
 
-                    String mp4Path = SDKUtil.VIDEO_PATH+"/"+x+".mp4";
+                    String mp4Path = SDKUtil.VIDEO_PATH + "/" + x + ".mp4";
                     List<String> list = new ArrayList<>();
                     list.add(mediaPart.mediaPath);
                     ts2Mp4(list, mp4Path);
@@ -351,26 +368,32 @@ public class RecordedActivity extends BaseActivity {
                 List<String> tsList = new ArrayList<>();
                 for (int x = 0; x < pathList.size(); x++) {
                     String path = pathList.get(x);
-                    String ts = SDKUtil.VIDEO_PATH+"/"+x+".ts";
+                    String ts = SDKUtil.VIDEO_PATH + "/" + x + ".ts";
                     mp4ToTs(path, ts);
                     tsList.add(ts);
                 }
-
-                String output = SDKUtil.VIDEO_PATH+"/finish.mp4";
+                imagePath = SDKUtil.VIDEO_PATH + "/" + System.currentTimeMillis() + ".jpg";
+                String output = SDKUtil.VIDEO_PATH + "/"+System.currentTimeMillis()+".mp4";
                 boolean flag = ts2Mp4(tsList, output);
-                if(!flag) output = "";
-                deleteDirRoom(new File(SDKUtil.VIDEO_PATH), output);
-                return output;
+                if (!flag) output = "";
+
+                String cmd = String.format("ffmpeg -i %s -vframes 1 %s", output, imagePath);
+                UtilityAdapter.FFmpegRun("", cmd);
+                pathList.addAll(tsList);
+                deleteFiles(pathList);
+                return new VideoInfo(true,output,imagePath);
             }
+
             @Override
-            protected void onPostExecute(String result) {
+            protected void onPostExecute(VideoInfo videoInfo) {
+                mVideoInfo=videoInfo;
                 closeProgressDialog();
-                if(!TextUtils.isEmpty(result)){
+                if (!TextUtils.isEmpty(videoInfo.getVideoPath())) {
                     rl_bottom2.setVisibility(View.VISIBLE);
                     vv_play.setVisibility(View.VISIBLE);
                     rl_top.setVisibility(View.GONE);
 
-                    vv_play.setVideoPath(result);
+                    vv_play.setVideoPath(videoInfo.getVideoPath());
                     vv_play.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                         @Override
                         public void onPrepared(MediaPlayer mp) {
@@ -378,11 +401,11 @@ public class RecordedActivity extends BaseActivity {
                             vv_play.start();
                         }
                     });
-                    if(vv_play.isPrepared()){
+                    if (vv_play.isPrepared()) {
                         vv_play.setLooping(true);
                         vv_play.start();
                     }
-                }else{
+                } else {
                     Toast.makeText(getApplicationContext(), "视频合成失败", Toast.LENGTH_SHORT).show();
                 }
             }
@@ -393,56 +416,43 @@ public class RecordedActivity extends BaseActivity {
      * 合成照片
      */
     @SuppressLint("StaticFieldLeak")
-    private void syntCamera(){
+    private void syntCamera() {
 
-        new AsyncTask<Void, Void, Bitmap>() {
+        new AsyncTask<Void, Void, String>() {
             @Override
             protected void onPreExecute() {
 
             }
+
             @Override
-            protected Bitmap doInBackground(Void... params) {
+            protected String doInBackground(Void... params) {
 
                 LinkedList<MediaObject.MediaPart> mediaParts = mMediaObject.getMediaParts();
                 String tsPath = mediaParts.getFirst().mediaPath;
                 ArrayList<String> tsList = new ArrayList<>();
                 tsList.add(tsPath);
-
-                String mp4Path = SDKUtil.VIDEO_PATH+"/cameraTemp.mp4";
+                String mp4Path = SDKUtil.VIDEO_PATH + "/cameraTemp.mp4";
                 ts2Mp4(tsList, mp4Path);
-
-                MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-                mmr.setDataSource(mp4Path);
-                Bitmap photo = mmr.getFrameAtTime(1);
-                mmr.release();
-
-                imagePath = SDKUtil.VIDEO_PATH+"/"+System.currentTimeMillis()+".jpg";
-                try {
-                    FileOutputStream outputStream = new FileOutputStream(imagePath);
-                    photo.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
-                    outputStream.close();
-                } catch (FileNotFoundException e) {
-                    e.printStackTrace();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-
-                deleteDirRoom(new File(SDKUtil.VIDEO_PATH), imagePath);
-
-                return photo;
+                imagePath = SDKUtil.VIDEO_PATH + "/" + System.currentTimeMillis() + ".jpg";
+                String cmd = String.format("ffmpeg -i %s -vframes 1 %s", mp4Path, imagePath);
+                UtilityAdapter.FFmpegRun("", cmd);
+                tsList.add(mp4Path);
+                deleteFiles(tsList);
+                return imagePath;
             }
+
             @Override
-            protected void onPostExecute(Bitmap result) {
+            protected void onPostExecute(String result) {
                 closeProgressDialog();
-                if(result != null){
+                if (result != null) {
                     changeButton(false);
                     rl_bottom2.setVisibility(View.VISIBLE);
                     iv_photo.setVisibility(View.VISIBLE);
                     rl_top.setVisibility(View.GONE);
                     rb_start.setVisibility(View.GONE);
-                    iv_photo.setImageBitmap(result);
+                    iv_photo.setImageBitmap(BitmapFactory.decodeFile(result));
 
-                }else{
+                } else {
                     Toast.makeText(getApplicationContext(), "照片拍摄失败", Toast.LENGTH_SHORT).show();
                     initMediaRecorderState();
                 }
@@ -450,61 +460,72 @@ public class RecordedActivity extends BaseActivity {
         }.execute();
     }
 
-    /**
-     * 删除文件夹下所有文件, 只保留一个
-     * @param fileName 保留的文件名称
-     */
-    public static void deleteDirRoom(File dir, String fileName){
+//    /**
+//     * 删除文件夹下所有文件, 只保留一个
+//     *
+//     * @param fileName 保留的文件名称
+//     */
+//    public static void deleteDirRoom(File dir, String fileName) {
+//
+//        if (dir.exists() && dir.isDirectory()) {
+//            File[] files = dir.listFiles();
+//            for (File f : files) {
+//                deleteDirRoom(f, fileName);
+//            }
+//        } else if (dir.exists()) {
+//            if (!dir.getAbsolutePath().equals(fileName)) {
+//                dir.delete();
+//            }
+//        }
+//    }
 
-        if(dir.exists() && dir.isDirectory()){
-            File[] files = dir.listFiles();
-            for(File f: files){
-                deleteDirRoom(f, fileName);
-            }
-        }else if(dir.exists()) {
-            if (!dir.getAbsolutePath().equals(fileName)){
-                dir.delete();
-            }
+    public static void deleteFiles(List<String > filePaths) {
+
+        for (String path : filePaths) {
+            System.out.println("---------paht:"+path);
+            File file=new File(path);
+            if (file.exists())file.delete();
         }
+
     }
 
-    public void mp4ToTs(String path, String output){
+    public void mp4ToTs(String path, String output) {
 
         //./ffmpeg -i 0.mp4 -c copy -bsf:v h264_mp4toannexb -f mpegts ts0.ts
 
         StringBuilder sb = new StringBuilder("ffmpeg");
         sb.append(" -i");
-        sb.append(" "+path);
+        sb.append(" " + path);
         sb.append(" -c");
         sb.append(" copy");
         sb.append(" -bsf:v");
         sb.append(" h264_mp4toannexb");
         sb.append(" -f");
         sb.append(" mpegts");
-        sb.append(" "+output);
+        sb.append(" " + output);
 
         int i = UtilityAdapter.FFmpegRun("", sb.toString());
     }
 
-    public boolean ts2Mp4(List<String> path, String output){
+    public boolean ts2Mp4(List<String> path, String output) {
 
         //ffmpeg -i "concat:ts0.ts|ts1.ts|ts2.ts|ts3.ts" -c copy -bsf:a aac_adtstoasc out2.mp4
 
         StringBuilder sb = new StringBuilder("ffmpeg");
         sb.append(" -i");
-        String concat="concat:";
-        for (String part : path){
+        String concat = "concat:";
+        for (String part : path) {
             concat += part;
             concat += "|";
         }
-        concat = concat.substring(0, concat.length()-1);
-        sb.append(" "+concat);
+        concat = concat.substring(0, concat.length() - 1);
+        sb.append(" " + concat);
         sb.append(" -c");
         sb.append(" copy");
         sb.append(" -bsf:a");
         sb.append(" aac_adtstoasc");
         sb.append(" -y");
-        sb.append(" "+output);
+        sb.append(" " + output);
 
         int i = UtilityAdapter.FFmpegRun("", sb.toString());
         return i == 0;
@@ -546,9 +567,9 @@ public class RecordedActivity extends BaseActivity {
 
     @Override
     public void onBackPressed() {
-        if(rb_start.getSplitCount() == 0) {
+        if (rb_start.getSplitCount() == 0) {
             super.onBackPressed();
-        }else{
+        } else {
             initMediaRecorderState();
         }
     }
@@ -563,14 +584,12 @@ public class RecordedActivity extends BaseActivity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if(resultCode == RESULT_OK){
-            if(requestCode == REQUEST_KEY){
-                if(data != null){
-                    Intent intent = new Intent();
-                    intent.putExtra("videoPath", data.getStringExtra("videoPath"));
-                    setResult(RESULT_OK, intent);
+        if (resultCode == RESULT_OK) {
+            if (requestCode == REQUEST_KEY) {
+                if (data != null) {
+                    setResult(RESULT_OK, data);
                     finish();
-                }else{
+                } else {
                     initMediaRecorderState();
                 }
             }

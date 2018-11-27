@@ -33,11 +33,13 @@ import android.widget.Toast;
 
 import com.yixia.camera.MediaRecorderBase;
 import com.yixia.videoeditor.adapter.UtilityAdapter;
+import com.zero.smallvideorecord.VideoInfo;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Locale;
 
 /**
@@ -69,7 +71,7 @@ public class EditVideoActivity extends BaseActivity {
     private InputMethodManager manager;
     private int windowHeight;
     private int windowWidth;
-    private String path;
+
     private RelativeLayout rl_tuya;
     private RelativeLayout rl_close;
     private RelativeLayout rl_title;
@@ -83,6 +85,7 @@ public class EditVideoActivity extends BaseActivity {
     private float videoSpeed = 1;
     private int videoWidth;
     private int videoHeight;
+    private VideoInfo mVideoInfo=null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,9 +106,9 @@ public class EditVideoActivity extends BaseActivity {
     private void initData() {
 
         Intent intent = getIntent();
-        path = intent.getStringExtra("path");
+        mVideoInfo = (VideoInfo) intent.getSerializableExtra("videoInfo");
 
-        vv_play.setVideoPath(path);
+        vv_play.setVideoPath(mVideoInfo.getVideoPath());
         vv_play.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
             public void onPrepared(MediaPlayer mp) {
@@ -274,7 +277,7 @@ public class EditVideoActivity extends BaseActivity {
             @Override
             public void onClick(View v) {
                 Intent intent = new Intent(EditVideoActivity.this, CutTimeActivity.class);
-                intent.putExtra("path", path);
+                intent.putExtra("videoInfo", mVideoInfo);
                 startActivityForResult(intent, 2);
             }
         });
@@ -552,7 +555,9 @@ public class EditVideoActivity extends BaseActivity {
                 rl_edit_text.setY(value);
             }
         });
-        if (listenerAdapter != null) va.addListener(listenerAdapter);
+        if (listenerAdapter != null) {
+            va.addListener(listenerAdapter);
+        }
         va.start();
     }
 
@@ -614,7 +619,7 @@ public class EditVideoActivity extends BaseActivity {
     private void changeCutState() {
 
         Intent intent = new Intent(this, CutSizeActivity.class);
-        intent.putExtra("path", path);
+        intent.putExtra("videoInfo", mVideoInfo);
         startActivityForResult(intent, 1);
     }
 
@@ -635,7 +640,7 @@ public class EditVideoActivity extends BaseActivity {
     /**
      * 合成图片到视频里
      */
-    private String mergeImage(String path) {
+    private VideoInfo mergeImage(String path) {
 
         //得到涂鸦view的bitmap图片
         Bitmap bitmap = Bitmap.createBitmap(rl_tuya.getWidth(), rl_tuya.getHeight(), Bitmap.Config.ARGB_8888);
@@ -656,7 +661,10 @@ public class EditVideoActivity extends BaseActivity {
             e.printStackTrace();
         }
 
-        String mergeVideo = SDKUtil.VIDEO_PATH + "/mergeVideo.mp4";
+        long currentTimeMillis = System.currentTimeMillis();
+        String mergeVideo = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
+        String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
+
 
         //ffmpeg -i videoPath -i imagePath -filter_complex overlay=0:0 -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k -g 30 -f mp4 outPath
         StringBuilder sb = new StringBuilder();
@@ -670,21 +678,21 @@ public class EditVideoActivity extends BaseActivity {
         sb.append(" -vcodec libx264 -profile:v baseline -preset ultrafast -b:v 3000k -g 25");
         sb.append(" -f mp4");
         sb.append(" " + mergeVideo);
-
-        int i = UtilityAdapter.FFmpegRun("", sb.toString());
-        if (i == 0) {
-            return mergeVideo;
-        } else {
-            return "";
-        }
+        String cmd = String.format("ffmpeg -i %s -vframes 1 %s", mergeVideo, outputImagePath);
+        UtilityAdapter.FFmpegRun("", sb.toString());
+        UtilityAdapter.FFmpegRun("", cmd);
+        return new VideoInfo(true,mergeVideo,outputImagePath);
     }
 
     /**
      * 调整视频播放速度
      */
-    private String adjustVideoSpeed(String path, float speed) {
+    private VideoInfo adjustVideoSpeed(String path, float speed) {
 
-        String outPut = SDKUtil.VIDEO_PATH + "/speedVideo.mp4";
+
+        long currentTimeMillis = System.currentTimeMillis();
+        String outPut = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
+        String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
 
         //./ffmpeg -i 2x.mp4 -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" output3.mp4
         String filter = String.format(Locale.getDefault(), "[0:v]setpts=%f*PTS[v];[0:a]atempo=%f[a]", 1 / speed, speed);
@@ -699,18 +707,15 @@ public class EditVideoActivity extends BaseActivity {
         sb.append(" [a]");
         sb.append(" -y");
         sb.append(" " + outPut);
-
-        int i = UtilityAdapter.FFmpegRun("", sb.toString());
-        if (i == 0) {
-            return outPut;
-        } else {
-            return "";
-        }
+        String cmd = String.format("ffmpeg -i %s -vframes 1 %s", outPut, outputImagePath);
+        UtilityAdapter.FFmpegRun("", sb.toString());
+        UtilityAdapter.FFmpegRun("", cmd);
+        return new VideoInfo(true,outPut,outputImagePath);
     }
 
     @Override
     public void onBackPressed() {
-        setResult(RESULT_OK);
+        finishActivity(mVideoInfo);
         if(rl_edit_text.getVisibility() == View.VISIBLE){
             changeTextState(false);
         }else {
@@ -732,21 +737,28 @@ public class EditVideoActivity extends BaseActivity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-
+        mVideoInfo= (VideoInfo) data.getSerializableExtra("videoInfo");
         if (resultCode != RESULT_OK) {
             return;
         }
 
         switch (requestCode) {
             case 1:
-                vv_play.setVideoPath(path);
+                vv_play.setVideoPath(mVideoInfo.getVideoPath());
                 vv_play.start();
                 break;
             case 2:
-                vv_play.setVideoPath(path);
+                vv_play.setVideoPath(mVideoInfo.getVideoPath());
                 vv_play.start();
                 break;
         }
+    }
+
+    private void finishActivity(VideoInfo videoInfo){
+        Intent intent = new Intent();
+        intent.putExtra("videoInfo", videoInfo);
+        setResult(RESULT_OK, intent);
+        finish();
     }
 
     private boolean isPen;
@@ -775,36 +787,30 @@ public class EditVideoActivity extends BaseActivity {
         }
 
         if(!isPen && !isImage && !isSpeed){
-            Intent intent = new Intent();
-            intent.putExtra("videoPath", path);
-            setResult(RESULT_OK, intent);
-            finish();
+            finishActivity(mVideoInfo);
             return ;
         }
 
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, VideoInfo>() {
             @Override
             protected void onPreExecute() {
                 showProgressDialog();
             }
 
             @Override
-            protected String doInBackground(Void... params) {
-                String videoPath = mergeImage(path);
+            protected VideoInfo doInBackground(Void... params) {
+                VideoInfo videoInfo = mergeImage(mVideoInfo.getVideoPath());
                 if (videoSpeed != 1) {
-                    videoPath = adjustVideoSpeed(videoPath, videoSpeed);
+                    videoInfo = adjustVideoSpeed(mVideoInfo.getVideoPath(), videoSpeed);
                 }
-                return videoPath;
+                return videoInfo;
             }
 
             @Override
-            protected void onPostExecute(String result) {
+            protected void onPostExecute(VideoInfo result) {
                 closeProgressDialog();
-                if (!TextUtils.isEmpty(result)) {
-                    Intent intent = new Intent();
-                    intent.putExtra("videoPath", result);
-                    setResult(RESULT_OK, intent);
-                    finish();
+                if (!TextUtils.isEmpty(result.getVideoPath())) {
+                    finishActivity(result);
                 } else {
                     Toast.makeText(getApplicationContext(), "视频编辑失败", Toast.LENGTH_SHORT).show();
                 }

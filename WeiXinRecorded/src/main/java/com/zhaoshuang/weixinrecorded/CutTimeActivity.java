@@ -26,6 +26,7 @@ import android.widget.Toast;
 
 import com.yixia.camera.MediaRecorderBase;
 import com.yixia.videoeditor.adapter.UtilityAdapter;
+import com.zero.smallvideorecord.VideoInfo;
 
 /**
  * Created by zhaoshuang on 2017/9/30.
@@ -34,7 +35,7 @@ import com.yixia.videoeditor.adapter.UtilityAdapter;
 public class CutTimeActivity extends BaseActivity{
 
     private MediaPlayer mMediaPlayer;
-    private String path;
+    private VideoInfo mVideoInfo=null;
     private TextureView textureView;
     private int videoWidth;
     private int videoHeight;
@@ -59,7 +60,7 @@ public class CutTimeActivity extends BaseActivity{
         windowHeight = getWindowManager().getDefaultDisplay().getHeight();
 
         Intent intent = getIntent();
-        path = intent.getStringExtra("path");
+       mVideoInfo= (VideoInfo) intent.getSerializableExtra("videoInfo");
 
         initUI();
     }
@@ -121,20 +122,27 @@ public class CutTimeActivity extends BaseActivity{
 
     private void cutVideo() {
 
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<Void, Void, VideoInfo>() {
             @Override
             protected void onPreExecute() {
                 TextView textView = showProgressDialog();
                 textView.setText("视频剪切中");
             }
             @Override
-            protected String doInBackground(Void... params) {
+            protected VideoInfo doInBackground(Void... params) {
 
                 //ffmpeg -ss 00:00:15 -t 00:00:05 -i input.mp4 -vcodec copy -acodec copy output.mp4
-                String output = SDKUtil.VIDEO_PATH+"/"+ System.currentTimeMillis()+".mp4";
+                long currentTimeMillis = System.currentTimeMillis();
+                String output = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
+                String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
 
-                int startM = startTime/1000;
-                int endM = (endTime-startTime)/1000;
+                float startM = startTime/(float)1000;
+                float endM = (endTime-startTime)/(float)1000;
+
+                System.out.println("-------------->startTime:"+startTime);
+                System.out.println("-------------->endTime:"+endTime);
+                System.out.println("-------------->startM:"+startM);
+                System.out.println("-------------->endM:"+endM);
 
                 String startStr;
                 String endStr;
@@ -150,33 +158,32 @@ public class CutTimeActivity extends BaseActivity{
                 }else{
                     endStr = "00:00:"+endM;
                 }
-
                 StringBuilder sb = new StringBuilder("ffmpeg");
-                sb.append(" -i");
-                sb.append(" "+path);
-                sb.append(" -vcodec");
-                sb.append(" copy");
-                sb.append(" -acode00c");
-                sb.append(" copy");
                 sb.append(" -ss");
                 sb.append(" "+startStr);
                 sb.append(" -t");
                 sb.append(" "+endStr);
+                sb.append(" -i");
+                sb.append(" "+mVideoInfo.getVideoPath());
+                sb.append(" -vcodec");
+                sb.append(" copy");
+                sb.append(" -acodec");
+                sb.append(" copy");
                 sb.append(" "+output);
-                int i = UtilityAdapter.FFmpegRun("", sb.toString());
-                if(i == 0){
-                    return output;
-                }else{
-                    return "";
-                }
+                UtilityAdapter.FFmpegRun("", sb.toString());
+                String cmd = String.format("ffmpeg -i %s -vframes 1 %s", output, outputImagePath);
+                int i=UtilityAdapter.FFmpegRun("", cmd);
+               return new VideoInfo(true,output,outputImagePath);
             }
             @Override
-            protected void onPostExecute(String result) {
+            protected void onPostExecute(VideoInfo result) {
                 closeProgressDialog();
-                if(!TextUtils.isEmpty(result)){
+                if(!TextUtils.isEmpty(result.getVideoPath())){
                     Toast.makeText(mContext, "剪切成功", Toast.LENGTH_SHORT).show();
-                    CutSizeActivity.renameFile(result, path);
-                    setResult(RESULT_OK);
+//                    CutSizeActivity.renameFile(result, path);
+                    Intent intent =new Intent();
+                    intent.putExtra("videoInfo",result);
+                    setResult(RESULT_OK,intent);
                     finish();
                 }
             }
@@ -244,7 +251,7 @@ public class CutTimeActivity extends BaseActivity{
             @Override
             protected Boolean doInBackground(Void... params) {
                 MediaMetadataRetriever mediaMetadata= new MediaMetadataRetriever();
-                mediaMetadata.setDataSource(mContext, Uri.parse(path));
+                mediaMetadata.setDataSource(mContext, Uri.parse(mVideoInfo.getVideoPath()));
                 for (int x=0; x<frame; x++){
                     Bitmap bitmap = mediaMetadata.getFrameAtTime(frameTime*x, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
                     Message msg = myHandler.obtainMessage();
@@ -276,7 +283,7 @@ public class CutTimeActivity extends BaseActivity{
 
         try {
             mMediaPlayer = new MediaPlayer();
-            mMediaPlayer.setDataSource(path);
+            mMediaPlayer.setDataSource(mVideoInfo.getVideoPath());
             mMediaPlayer.setSurface(new Surface(surface));
             mMediaPlayer.setLooping(true);
             mMediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {

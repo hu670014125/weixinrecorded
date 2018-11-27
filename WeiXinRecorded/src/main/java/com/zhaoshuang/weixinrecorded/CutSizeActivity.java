@@ -13,6 +13,8 @@ import android.widget.TextView;
 
 import com.yixia.camera.MediaRecorderBase;
 import com.yixia.videoeditor.adapter.UtilityAdapter;
+import com.zero.smallvideorecord.VideoInfo;
+import com.zero.smallvideorecord.jniinterface.FFmpegBridge;
 
 import java.io.File;
 import java.util.Locale;
@@ -24,13 +26,14 @@ import java.util.Locale;
 public class CutSizeActivity extends BaseActivity implements View.OnClickListener{
 
     private MyVideoView vv_play;
-    private String path;
+
     private CutView cv_video;
     private int windowWidth;
     private int windowHeight;
     private int dp50;
     private int videoWidth;
     private int videoHeight;
+    private VideoInfo mVideoInfo=null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,8 +48,8 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
         initUI();
 
         Intent intent = getIntent();
-        path = intent.getStringExtra("path");
-        vv_play.setVideoPath(path);
+        mVideoInfo = (VideoInfo) intent.getSerializableExtra("videoInfo");
+        vv_play.setVideoPath(mVideoInfo.getVideoPath());
         vv_play.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
             public void onPrepared(MediaPlayer mp) {
@@ -89,13 +92,15 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
     /**
      * 裁剪视频大小
      */
-    private String cutVideo(String path, int cropWidth, int cropHeight, int x, int y){
+    private VideoInfo cutVideo(String path, int cropWidth, int cropHeight, int x, int y){
 
-        String outPut = SDKUtil.VIDEO_PATH+"/cutVideo.mp4";
 
+        long currentTimeMillis = System.currentTimeMillis();
+        String outPut = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".mp4";
+        String outputImagePath = SDKUtil.VIDEO_PATH+"/"+currentTimeMillis+".jpg";
         //./ffmpeg -i 2x.mp4 -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" output3.mp4
         String filter = String.format(Locale.getDefault(), "crop=%d:%d:%d:%d", cropWidth, cropHeight, x, y);
-        StringBuilder sb = new StringBuilder("ffmpeg");
+        StringBuilder sb = new StringBuilder("ffmpeg -y ");
         sb.append(" -i");
         sb.append(" "+path);
         sb.append(" -vf");
@@ -108,12 +113,12 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
         sb.append(" -y");
         sb.append(" "+outPut);
 
-        int i = UtilityAdapter.FFmpegRun("", sb.toString());
-        if(i == 0){
-            return outPut;
-        }else{
-            return "";
-        }
+        //UtilityAdapter.FFmpegRun("", sb.toString());
+        //使用FFmpegBridge要比UtilityAdapter快6倍左右
+        FFmpegBridge.jxFFmpegCMDRun(sb.toString());
+        String cmd = String.format("ffmpeg -i %s -vframes 1 %s", outPut, outputImagePath);
+        UtilityAdapter.FFmpegRun("", cmd);
+        return new VideoInfo(true,outPut,outputImagePath);
     }
 
     /**
@@ -132,7 +137,7 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
         return false;
     }
 
-    private String editVideo(){
+    private VideoInfo editVideo(){
 
         //得到裁剪后的margin值
         float[] cutArr = cv_video.getCutArr();
@@ -155,7 +160,7 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
         int x = (int) (leftPro*videoWidth);
         int y = (int) (topPro*videoHeight);
 
-        return cutVideo(path, cropWidth, cropHeight, x, y);
+        return cutVideo(mVideoInfo.getVideoPath(), cropWidth, cropHeight, x, y);
     }
 
     @Override
@@ -166,23 +171,25 @@ public class CutSizeActivity extends BaseActivity implements View.OnClickListene
             finish();
 
         } else if (i == R.id.rl_finish) {
-            new AsyncTask<Void, Void, String>() {
+            new AsyncTask<Void, Void, VideoInfo>() {
                 @Override
                 protected void onPreExecute() {
                     showProgressDialog();
                 }
 
                 @Override
-                protected String doInBackground(Void... params) {
+                protected VideoInfo doInBackground(Void... params) {
                     return editVideo();
                 }
 
                 @Override
-                protected void onPostExecute(String result) {
+                protected void onPostExecute(VideoInfo result) {
                     closeProgressDialog();
-                    if (!TextUtils.isEmpty(result)) {
-                        renameFile(result, path);
-                        setResult(RESULT_OK);
+                    if (!TextUtils.isEmpty(result.getVideoPath())) {
+//                        renameFile(result, result);
+                        Intent intent =new Intent();
+                        intent.putExtra("videoInfo",result);
+                        setResult(RESULT_OK,intent);
                         finish();
                     }
                 }
